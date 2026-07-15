@@ -1,106 +1,64 @@
 const express = require("express");
 const cors = require("cors");
-const admin = require("firebase-admin");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-
 // ===============================
-// Firebase Admin
-// ===============================
-
-// Plus tard on mettra serviceAccountKey.json
-// pour connecter Render à Firestore
-
-admin.initializeApp();
-
-const db = admin.firestore();
-
-
-// ===============================
-// Test serveur
+// Route de test
 // ===============================
 
 app.get("/", (req, res) => {
-  res.send("Radio Maria Backend fonctionne !");
+  res.json({
+    success: true,
+    message: "Radio Maria Backend fonctionne sur Render",
+  });
 });
 
-
 // ===============================
-// Création demande soutien
+// Création demande soutien (test)
 // ===============================
 
 app.post("/create-support-request", async (req, res) => {
-
   try {
-
     const {
       nom,
       telephone,
       ville,
       formule,
-      montant
+      montant,
     } = req.body;
 
-
-    const doc =
-      await db.collection("demandes_soutien").add({
-
+    res.json({
+      success: true,
+      message: "Demande reçue",
+      data: {
         nom,
         telephone,
         ville,
         formule,
         montant,
-
-        statut: "en_attente",
-
-        createdAt:
-          admin.firestore.FieldValue.serverTimestamp(),
-
-      });
-
-
-    res.json({
-
-      success: true,
-
-      id: doc.id,
-
+      },
     });
 
-
-  } catch(error) {
-
+  } catch (error) {
     console.error(error);
 
     res.status(500).json({
-
-      success:false,
-
-      message:error.message
-
+      success: false,
+      message: error.message,
     });
-
   }
-
 });
-
 
 // ===============================
 // Démarrage serveur Render
 // ===============================
 
-const PORT =
- process.env.PORT || 10000;
-
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-
- console.log(
-   `Serveur lancé sur le port ${PORT}`
- );
-
+  console.log(`Serveur lancé sur le port ${PORT}`);
 });
