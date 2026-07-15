@@ -8,9 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 
-// ===============================
-// Firebase Admin
-// ===============================
+// Firebase Admin avec variables Render
 
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -18,8 +16,8 @@ admin.initializeApp({
 
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
 
-    privateKey: process.env.FIREBASE_PRIVATE_KEY
-      .replace(/\\n/g, "\n"),
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+
   }),
 });
 
@@ -27,171 +25,75 @@ admin.initializeApp({
 const db = admin.firestore();
 
 
-// ===============================
 // Test serveur
-// ===============================
-
 app.get("/", (req, res) => {
+  res.send("Radio Maria Backend fonctionne !");
+});
 
-  res.json({
-    success: true,
-    message: "Radio Maria Backend connecté à Firestore",
-  });
+
+// Création demande soutien
+
+app.post("/create-support-request", async (req, res) => {
+
+  try {
+
+    const {
+      nom,
+      telephone,
+      ville,
+      formule,
+      montant
+
+    } = req.body;
+
+
+    const doc = await db.collection("demandes_soutien").add({
+
+      nom,
+      telephone,
+      ville,
+      formule,
+      montant,
+
+      statut: "en_attente",
+
+      createdAt:
+        admin.firestore.FieldValue.serverTimestamp(),
+
+    });
+
+
+    res.json({
+
+      success:true,
+      id:doc.id
+
+    });
+
+
+  } catch(error){
+
+    console.error(error);
+
+    res.status(500).json({
+
+      success:false,
+      message:error.message
+
+    });
+
+  }
 
 });
 
 
-// ===============================
-// Création demande service
-// ===============================
+// Port Render
 
-app.post("/create-service-request", async (req, res)=>{
+const PORT = process.env.PORT || 10000;
 
-try {
 
-const {
-  userId,
-  service,
-  description,
-  montant
-}=req.body;
+app.listen(PORT, ()=>{
 
-
-const doc = await db
-.collection("demandes_services")
-.add({
-
-userId,
-service,
-description,
-montant,
-
-status:"pending",
-
-dateCreation:
-admin.firestore.FieldValue.serverTimestamp()
-
-});
-
-
-res.json({
-
-success:true,
-
-id:doc.id
-
-});
-
-
-}catch(error){
-
-console.error(error);
-
-res.status(500).json({
-
-success:false,
-
-message:error.message
-
-});
-
-}
-
-
-});
-
-
-
-// ===============================
-// Création demande paiement
-// Préparation CinetPay
-// ===============================
-
-app.post("/create-payment-request", async(req,res)=>{
-
-try{
-
-
-const {
-
-nom,
-telephone,
-ville,
-formule,
-montant
-
-}=req.body;
-
-
-
-const doc =
-await db.collection("payment_requests")
-.add({
-
-nom,
-telephone,
-ville,
-formule,
-montant,
-
-operateur:null,
-
-transactionId:null,
-
-paymentUrl:null,
-
-paymentStatus:"non_paye",
-
-status:"en_attente",
-
-dateCreation:
-admin.firestore.FieldValue.serverTimestamp()
-
-});
-
-
-res.json({
-
-success:true,
-
-id:doc.id,
-
-message:"Demande paiement créée"
-
-});
-
-
-}catch(error){
-
-console.error(error);
-
-res.status(500).json({
-
-success:false,
-
-message:error.message
-
-});
-
-}
-
-
-});
-
-
-
-// ===============================
-// Serveur Render
-// ===============================
-
-const PORT =
-process.env.PORT || 10000;
-
-
-app.listen(PORT,()=>{
-
-console.log(
-`Serveur lancé sur le port ${PORT}`
-);
+ console.log(`Serveur lancé sur le port ${PORT}`);
 
 });
