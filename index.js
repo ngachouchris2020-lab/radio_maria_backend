@@ -35,6 +35,8 @@ app.get("/", (req, res) => {
 
 app.post("/create-support-request", async (req, res) => {
 
+   console.log("POST /create-support-request reçu");
+   
   try {
 
     const {
