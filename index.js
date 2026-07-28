@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
@@ -5,36 +7,32 @@ const admin = require("firebase-admin");
 const app = express();
 
 
+// ===============================
 // Middlewares
+// ===============================
 
 app.use(cors());
 app.use(express.json());
 
 
+
 // ===============================
 // Firebase Admin Configuration
-// Render Environment Variables
 // ===============================
 
 try {
 
   admin.initializeApp({
 
-    credential: admin.credential.cert({
-
-      projectId: process.env.FIREBASE_PROJECT_ID,
-
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-
-      privateKey: process.env.FIREBASE_PRIVATE_KEY
-        ?.replace(/\\n/g, "\n"),
-
-    }),
+    credential: admin.credential.cert(
+      require("./radio-f14ca-firebase-adminsdk-fbsvc-42deb1673c.json")
+    )
 
   });
 
 
   console.log("Firebase Admin connecté");
+
 
 } catch (error) {
 
@@ -46,7 +44,32 @@ try {
 }
 
 
+
 const db = admin.firestore();
+
+
+
+// ===============================
+// NOKASH SERVICE
+// ===============================
+
+const {
+  createPayment
+} = require("./services/nokash.service");
+
+
+
+console.log(
+  "NOKASH_API_URL =",
+  process.env.NOKASH_API_URL
+);
+
+
+console.log(
+  "NOKASH_MERCHANT_ID =",
+  process.env.NOKASH_MERCHANT_ID
+);
+
 
 
 // ===============================
@@ -63,43 +86,45 @@ app.get("/", (req, res) => {
 
 
 
-// ===============================
-// Création demande soutien (INCHANGÉ)
-// ===============================
 
-app.post("/create-support-request", async (req, res) => {
+// ==================================================
+// Création paiement NOKASH
+// Préparé pour recevoir les vraies clés API plus tard
+// ==================================================
+
+app.post("/create-payment", async (req, res) => {
 
 
   try {
 
 
     const {
+
       nom,
+
       telephone,
-      ville,
-      formule,
-      montant
+
+      montant,
+
+      formule
 
     } = req.body;
 
 
 
-    // Validation simple
-
-    if (
+    if(
       !nom ||
       !telephone ||
-      !ville ||
-      !formule ||
-      !montant
-    ) {
+      !montant ||
+      !formule
+    ){
 
       return res.status(400).json({
 
         success:false,
 
         message:
-        "Informations incomplètes"
+        "Informations paiement incomplètes"
 
       });
 
@@ -107,40 +132,58 @@ app.post("/create-support-request", async (req, res) => {
 
 
 
-    const demande = {
-
-      nom,
-
-      telephone,
-
-      ville,
-
-      formule,
-
-      montant:Number(montant),
+    const reference =
+      "RM-" + Date.now();
 
 
-      statut:"en_attente",
 
+    const nokashResponse =
+      await createPayment({
 
-      createdAt:
-      admin.firestore.FieldValue.serverTimestamp(),
+        amount:Number(montant),
 
-    };
+        phone:telephone,
+
+        description:formule,
+
+        reference
+
+      });
 
 
 
     const doc =
-    await db
-    .collection("demandes_soutien")
-    .add(demande);
+      await db
+      .collection("payment_requests")
+      .add({
+
+        nom,
+
+        telephone,
+
+        montant:Number(montant),
+
+        formule,
 
 
+        reference,
 
-    console.log(
-      "Nouvelle demande :",
-      doc.id
-    );
+
+        status:
+        "paiement_initie",
+
+
+        paymentStatus:
+        "en_attente",
+
+
+        nokashResponse,
+
+
+        createdAt:
+        admin.firestore.FieldValue.serverTimestamp()
+
+      });
 
 
 
@@ -150,8 +193,9 @@ app.post("/create-support-request", async (req, res) => {
 
       id:doc.id,
 
-      message:
-      "Demande enregistrée avec succès"
+      reference,
+
+      data:nokashResponse
 
     });
 
@@ -161,7 +205,7 @@ app.post("/create-support-request", async (req, res) => {
 
 
     console.error(
-      "Erreur création demande :",
+      "Erreur création paiement NOKASH :",
       error
     );
 
@@ -172,7 +216,7 @@ app.post("/create-support-request", async (req, res) => {
       success:false,
 
       message:
-      "Erreur serveur"
+      "Erreur création paiement"
 
     });
 
@@ -183,114 +227,500 @@ app.post("/create-support-request", async (req, res) => {
 });
 
 
-// ===================================================================
-// NOUVEAU — Génération séquentielle du numéro de carte de fidélité
-// ===================================================================
-//
-// IMPORTANT : ce numéro ne doit JAMAIS être généré côté Flutter.
-// Si deux utilisateurs créent une demande au même moment, un calcul fait
-// dans l'app (ex: DateTime.now()) pourrait produire le même numéro pour
-// les deux. Ici, on utilise une transaction Firestore : elle garantit
-// que même en cas d'appels simultanés, chaque lecture+écriture du
-// compteur est atomique, donc jamais deux demandes ne reçoivent le
-// même numéro.
-//
-// Format : RM-{année}-{6 chiffres}, avec remise à zéro chaque année.
 
-async function genererNumeroCarte() {
-  const anneeActuelle = new Date().getFullYear();
-  const counterRef = db.collection("counters").doc("cardNumber");
 
-  const nouveauNumero = await db.runTransaction(async (transaction) => {
-    const doc = await transaction.get(counterRef);
+// ==================================================
+// Webhook NOKASH
+// NOKASH appelle cette route après paiement
+// ==================================================
 
-    let valeur = 1;
+app.post("/nokash-webhook", async (req,res)=>{
 
-    if (doc.exists) {
-      const data = doc.data();
-      if (data.annee === anneeActuelle) {
-        valeur = data.valeur + 1;
-      }
-      // Si l'année a changé, on repart automatiquement à 1.
-    }
 
-    transaction.set(counterRef, { annee: anneeActuelle, valeur });
+try {
 
-    return valeur;
-  });
 
-  const valeurFormatee = String(nouveauNumero).padStart(6, "0");
-  return `RM-${anneeActuelle}-${valeurFormatee}`;
+const data = req.body;
+
+
+
+console.log(
+"Notification NOKASH :",
+data
+);
+
+
+
+// Recherche par référence
+
+const snapshot =
+await db
+.collection("payment_requests")
+.where(
+"reference",
+"==",
+data.reference
+)
+.get();
+
+
+
+if(!snapshot.empty){
+
+
+const doc =
+snapshot.docs[0];
+
+
+await doc.ref.update({
+
+  paymentStatus:
+    data.status,
+
+  transactionId:
+    data.transaction_id || "",
+
+  paymentDate:
+    admin.firestore.FieldValue.serverTimestamp(),
+
+  updatedAt:
+    admin.firestore.FieldValue.serverTimestamp()
+
+});
+
+
+console.log(
+"Paiement mis à jour :",
+data.reference
+);
+
+
 }
 
 
-// ===================================================================
-// NOUVEAU — Création d'une demande de soutien AVEC carte de fidélité
-// Écrit dans la collection payment_requests, avec le schéma exact que
-// vous avez défini dans la console Firebase.
-// ===================================================================
 
-app.post("/create-payment-request", async (req, res) => {
-  try {
-    const { nom, telephone, formule, montant, operateur } = req.body;
+return res.sendStatus(200);
 
-    if (!nom || !telephone || !formule || !montant || !operateur) {
-      return res.status(400).json({
-        success: false,
-        message: "Informations incomplètes",
-      });
-    }
 
-    const cardNumber = await genererNumeroCarte();
 
-    const demande = {
-      cardNumber,
-      nom,
-      telephone: Number(telephone),
-      formule,
-      montant: Number(montant),
-      operateur,
+}catch(error){
 
-      // Deux statuts séparés, comme dans votre schéma :
-      // - status       : où en est la DEMANDE (en_attente / validee / ...)
-      // - paymentStatus: où en est le PAIEMENT (non_paye / paye / echec)
-      status: "en_attente",
-      paymentStatus: "non_paye",
 
-      dateCreation: admin.firestore.FieldValue.serverTimestamp(),
-    };
+console.error(
+"Erreur webhook NOKASH :",
+error
+);
 
-    const doc = await db.collection("payment_requests").add(demande);
 
-    console.log("Nouvelle demande de soutien :", doc.id, cardNumber);
+return res.sendStatus(500);
 
-    return res.json({
-      success: true,
-      id: doc.id,
-      cardNumber,
-      message: "Demande enregistrée avec succès",
-    });
-  } catch (error) {
-    console.error("Erreur création payment_request :", error);
-    return res.status(500).json({
-      success: false,
-      message: "Erreur serveur",
-    });
-  }
+
+}
+
+
 });
 
 
+
+
+// ==================================================
+// Création demande soutien
+// ==================================================
+
+app.post("/create-support-request", async (req,res)=>{
+
+
+try {
+
+
+const {
+
+nom,
+
+telephone,
+
+ville,
+
+formule,
+
+montant
+
+
+}=req.body;
+
+
+
+if(
+!nom ||
+!telephone ||
+!ville ||
+!formule ||
+!montant
+){
+
+
+return res.status(400).json({
+
+success:false,
+
+message:
+"Informations incomplètes"
+
+});
+
+
+}
+
+
+
+const demande = {
+
+
+nom,
+
+
+telephone,
+
+
+ville,
+
+
+formule,
+
+
+montant:Number(montant),
+
+
+statut:
+"en_attente",
+
+
+createdAt:
+admin.firestore.FieldValue.serverTimestamp()
+
+
+};
+
+
+
+
+const doc =
+await db
+.collection("demandes_soutien")
+.add(demande);
+
+
+
+
+return res.json({
+
+success:true,
+
+id:doc.id,
+
+message:
+"Demande enregistrée avec succès"
+
+});
+
+
+
+}catch(error){
+
+
+console.error(
+"Erreur création demande :",
+error
+);
+
+
+return res.status(500).json({
+
+success:false,
+
+message:
+"Erreur serveur"
+
+});
+
+
+}
+
+
+
+});
+
+
+
+
+// ==================================================
+// Génération numéro carte fidélité
+// ==================================================
+
+async function genererNumeroCarte(){
+
+
+const anneeActuelle =
+new Date().getFullYear();
+
+
+
+const counterRef =
+db.collection("counters")
+.doc("cardNumber");
+
+
+
+const nouveauNumero =
+await db.runTransaction(
+async(transaction)=>{
+
+
+const doc =
+await transaction.get(counterRef);
+
+
+
+let valeur = 1;
+
+
+
+if(doc.exists){
+
+
+const data =
+doc.data();
+
+
+
+if(data.annee === anneeActuelle){
+
+valeur =
+data.valeur + 1;
+
+}
+
+
+}
+
+
+
+transaction.set(
+counterRef,
+{
+
+annee:
+anneeActuelle,
+
+valeur
+
+}
+
+);
+
+
+
+return valeur;
+
+
+
+});
+
+
+
+const numero =
+String(nouveauNumero)
+.padStart(6,"0");
+
+
+
+return `RM-${anneeActuelle}-${numero}`;
+
+
+}
+
+
+
+
+// ==================================================
+// Demande soutien avec carte fidélité
+// ==================================================
+
+app.post("/create-payment-request", async(req,res)=>{
+
+
+try {
+
+
+const {
+
+nom,
+
+telephone,
+
+formule,
+
+montant,
+
+operateur
+
+
+}=req.body;
+
+
+
+if(
+!nom ||
+!telephone ||
+!formule ||
+!montant ||
+!operateur
+){
+
+
+return res.status(400).json({
+
+success:false,
+
+message:
+"Informations incomplètes"
+
+});
+
+
+}
+
+
+
+const cardNumber =
+await genererNumeroCarte();
+
+const paymentReference =
+  "RM-" + Date.now();
+
+const nokashResponse =
+  await createPayment({
+
+    amount: Number(montant),
+
+    phone: telephone,
+
+    description: formule,
+
+    reference: paymentReference
+
+  });
+
+const demande = {
+
+  cardNumber,
+
+  nom,
+
+  telephone:Number(telephone),
+
+  formule,
+
+  montant:Number(montant),
+
+  operateur,
+
+  status:"en_attente",
+
+  paymentStatus:"pending",
+
+  paymentReference,
+
+  transactionId:
+    nokashResponse.transaction_id || "",
+
+  dateCreation:
+    admin.firestore.FieldValue.serverTimestamp(),
+
+  createdAt:
+    admin.firestore.FieldValue.serverTimestamp(),
+
+  updatedAt:
+    admin.firestore.FieldValue.serverTimestamp()
+
+};
+
+
+
+const doc =
+await db
+.collection("payment_requests")
+.add(demande);
+
+
+
+return res.json({
+
+  success:true,
+
+  id:doc.id,
+
+  cardNumber,
+
+  paymentReference,
+
+  transactionId:
+    nokashResponse.transaction_id,
+
+  paymentStatus:
+    nokashResponse.status,
+
+  message:
+    "Paiement initié avec succès"
+
+});
+
+
+}catch(error){
+
+
+console.error(
+"Erreur payment_request :",
+error
+);
+
+
+
+return res.status(500).json({
+
+success:false,
+
+message:
+"Erreur serveur"
+
+});
+
+
+}
+
+
+});
+
+
+
+
 // ===============================
-// Serveur Render
+// Serveur
 // ===============================
 
-const PORT = process.env.PORT || 10000;
+const PORT =
+process.env.PORT || 10000;
 
 
-app.listen(PORT, () => {
 
-  console.log(
-    `Serveur lancé sur le port ${PORT}`
-  );
+app.listen(PORT,()=>{
+
+
+console.log(
+
+`Serveur lancé sur le port ${PORT}`
+
+);
+
 
 });
