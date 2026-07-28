@@ -1,4 +1,13 @@
 require("dotenv").config();
+console.log(
+  "PROJECT_ID =",
+  process.env.FIREBASE_PROJECT_ID
+);
+
+console.log(
+  "CLIENT_EMAIL =",
+  process.env.FIREBASE_CLIENT_EMAIL
+);
 
 const express = require("express");
 const cors = require("cors");
@@ -733,4 +742,58 @@ console.log(
 );
 
 
+});
+app.post("/create-service-request", async (req, res) => {
+  try {
+
+    const {
+      userId,
+      label,
+      price,
+      description,
+      telephone,
+      paymentMethod
+    } = req.body;
+
+    if (!label || !description) {
+      return res.status(400).json({
+        success: false,
+        message: "Informations incomplètes"
+      });
+    }
+
+    const doc = await db
+      .collection("demandes_services")
+      .add({
+        userId: userId || null,
+        service: label,
+        montant: price,
+        description,
+        telephone: telephone || null,
+        paymentMethod: paymentMethod || null,
+
+        statut:
+          price === "GRATUIT"
+            ? "en_attente"
+            : "paiement_requis",
+
+        createdAt:
+          admin.firestore.FieldValue.serverTimestamp()
+      });
+
+    return res.json({
+      success: true,
+      id: doc.id
+    });
+
+  } catch (error) {
+
+    console.error(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur"
+    });
+
+  }
 });
