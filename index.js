@@ -85,8 +85,22 @@ console.log(
 
 
 console.log(
-  "NOKASH_MERCHANT_ID =",
-  process.env.NOKASH_MERCHANT_ID
+  "NOKASH_API_URL =",
+  process.env.NOKASH_API_URL
+);
+
+console.log(
+  "NOKASH_INTEGRATOR_KEY =",
+  process.env.NOKASH_INTEGRATOR_KEY
+    ? "CONFIGURED"
+    : "MISSING"
+);
+
+console.log(
+  "NOKASH_APPLICATION_KEY =",
+  process.env.NOKASH_APPLICATION_KEY
+    ? "CONFIGURED"
+    : "MISSING"
 );
 
 
@@ -647,6 +661,7 @@ const demande = {
   status:"en_attente",
 
   paymentStatus:"pending",
+  cardStatus:"inactive",
 
   paymentReference,
 
@@ -660,7 +675,9 @@ const demande = {
     admin.firestore.FieldValue.serverTimestamp(),
 
   updatedAt:
-    admin.firestore.FieldValue.serverTimestamp()
+    admin.firestore.FieldValue.serverTimestamp(),
+
+    
 
 };
 
@@ -670,6 +687,25 @@ const doc =
 await db
 .collection("payment_requests")
 .add(demande);
+await db
+.collection("users")
+.doc(userId)
+.update({
+
+  hasFidelityCard:true,
+
+  cardNumber,
+
+  cardStatus:"inactive",
+
+  supportTier:formule,
+
+  subscriptionActive:false,
+
+  updatedAt:
+  admin.firestore.FieldValue.serverTimestamp()
+
+});
 
 
 

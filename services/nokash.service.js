@@ -1,121 +1,64 @@
+const axios = require("axios");
+
 async function createPayment(data) {
+  try {
+    const url =
+      `${process.env.NOKASH_API_URL}` +
+      `/lapas-on-trans/trans/api-payin-request/407`;
 
+    const payload = {
+      i_space_key: process.env.NOKASH_INTEGRATOR_KEY,
+      app_space_key: process.env.NOKASH_APPLICATION_KEY,
 
-    // =================================
-    // MODE SIMULATION (avant les clés NOKASH)
-    // =================================
+      order_id: data.reference,
 
-    if (
-        !process.env.NOKASH_API_KEY ||
-        process.env.NOKASH_API_KEY === "test"
-    ) {
+      amount: String(data.amount),
 
+      country: "CM",
 
-        console.log(
-            "NOKASH MODE SIMULATION"
-        );
+      payment_method: data.paymentMethod,
 
+      payment_type: "CM_MOBILEMONEY",
 
-        return {
+      callback_url: data.callbackUrl,
 
+      user_data: {
+        user_phone: data.phone
+      }
+    };
 
-            success:true,
+    // Ne jamais afficher les clés NoKaSH dans les logs
+    console.log("NOKASH REQUEST :", {
+      ...payload,
+      i_space_key: "***",
+      app_space_key: "***"
+    });
 
-
-            transaction_id:
-            "TEST-" + Date.now(),
-
-
-            status:
-            "pending",
-
-
-            message:
-            "Paiement simulé avec succès"
-
-
-        };
-
-
-    }
-
-
-
-    // =================================
-    // MODE REEL NOKASH
-    // Activé quand les vraies clés arrivent
-    // =================================
-
-
-    const axios = require("axios");
-
-
-    const response =
-    await axios.post(
-
-        `${process.env.NOKASH_API_URL}/payment`,
-
-        {
-
-
-            merchant_id:
-            process.env.NOKASH_MERCHANT_ID,
-
-
-            amount:
-            data.amount,
-
-
-            phone:
-            data.phone,
-
-
-            description:
-            data.description,
-
-
-            reference:
-            data.reference
-
-
+    const response = await axios.post(
+      url,
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json"
         },
-
-
-        {
-
-
-            headers:{
-
-
-                Authorization:
-                `Bearer ${process.env.NOKASH_API_KEY}`,
-
-
-                "X-SECRET":
-                process.env.NOKASH_SECRET,
-
-
-                "Content-Type":
-                "application/json"
-
-
-            }
-
-
-        }
-
+        timeout: 30000
+      }
     );
 
+    console.log("NOKASH RESPONSE :", response.data);
 
     return response.data;
 
+  } catch (error) {
+    console.error(
+      "NOKASH ERROR :",
+      error.response?.data || error.message
+    );
 
+    throw error;
+  }
 }
 
-
-
 module.exports = {
-
-    createPayment
-
+  createPayment
 };
