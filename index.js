@@ -258,99 +258,289 @@ app.post("/create-payment", async (req, res) => {
 
 
 
+```javascript
 // ==================================================
-// Webhook NOKASH
+// WEBHOOK NOKASH
 // NOKASH appelle cette route après paiement
 // ==================================================
 
-app.post("/nokash-webhook", async (req,res)=>{
+app.post("/nokash-webhook", async (req, res) => {
+
+  try {
+
+    const data = req.body;
+
+    console.log(
+      "Notification NOKASH :",
+      data
+    );
 
 
-try {
+    // ==================================================
+    // 1. Récupération de l'identifiant NoKaSH
+    // ==================================================
+
+   const orderId =
+  data.orderId ||
+  data.order_id ||
+  data.reference ||
+  data.paymentReference;
+
+const status =
+  data.status ||
+  data.payment_status;
 
 
-const data = req.body;
+if (!orderId) {
+  console.error(
+    "Webhook NOKASH : orderId manquant. Payload reçu :",
+    JSON.stringify(data, null, 2)
+  );
+
+  return res.sendStatus(400);
+}
+
+    // ==================================================
+    // 2. Recherche du paiement dans Firestore
+    // ==================================================
+    //
+    // NoKaSH envoie :
+    //
+    // orderId: "RM-..."
+    //
+    // Notre Firestore contient :
+    //
+    // paymentReference: "RM-..."
+    //
+    // ==================================================
+
+    const snapshot =
+      await db
+        .collection("payment_requests")
+        .where(
+          "paymentReference",
+          "==",
+          orderId
+        )
+        .limit(1)
+        .get();
 
 
+    // ==================================================
+    // 3. Paiement introuvable
+    // ==================================================
 
-console.log(
-"Notification NOKASH :",
-data
-);
+    if (snapshot.empty) {
 
+      console.error(
+        "Paiement introuvable pour orderId :",
+        orderId
+      );
 
-
-// Recherche par référence
-
-const snapshot =
-await db
-.collection("payment_requests")
-.where(
-"reference",
-"==",
-data.reference
-)
-.get();
+      return res.sendStatus(200);
+    }
 
 
+    // ==================================================
+    // 4. Récupération du paiement
+    // ==================================================
 
-if(!snapshot.empty){
+    const paymentDoc =
+      snapshot.docs[0];
+
+    const paymentData =
+      paymentDoc.data();
 
 
-const doc =
-snapshot.docs[0];
+    console.log(
+      "Paiement trouvé :",
+      paymentDoc.id
+    );
 
 
-await doc.ref.update({
+    // ==================================================
+    // 5. Mise à jour du paiement
+    // ==================================================
 
-  paymentStatus:
-    data.status,
+    await paymentDoc.ref.update({
 
-  transactionId:
-    data.transaction_id || "",
+      nokashStatus:
+        status,
 
-  paymentDate:
-    admin.firestore.FieldValue.serverTimestamp(),
+      statusReason:
+        data.statusReason || null,
 
+      transactionId:
+        data.id ||
+        data.transaction_id ||
+        null,
+
+      nokashNotification:
+        data,
+
+      updatedAt:
+        admin.firestore.FieldValue.serverTimestamp()
+
+    });
+
+
+    // ==================================================
+    // 6. SI LE PAIEMENT N'EST PAS SUCCESS
+    // ==================================================
+
+    if (status !== "SUCCESS") {
+
+      console.log(
+        "Paiement non réussi :",
+        status,
+        data.statusReason || ""
+      );
+
+
+      // Le paiement FAILED reste non payé
+      // La carte reste inactive
+
+      await paymentDoc.ref.update({
+
+        paymentStatus:
+          "failed",
+
+        status:
+          "paiement_echoue",
+
+        cardStatus:
+          "inactive",
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      });
+
+
+      return res.sendStatus(200);
+    }
+
+
+    // ==================================================
+    // 7. Vérification du userId
+    // ==================================================
+
+    const userId =
+      paymentData.userId;
+
+
+    if (!userId) {
+
+      console.error(
+        "Paiement SUCCESS mais userId manquant :",
+        orderId
+      );
+
+      return res.sendStatus(200);
+    }
+
+
+    // ==================================================
+    // 8. Vérification de l'utilisateur
+    // ==================================================
+
+    const userRef =
+      db
+        .collection("users")
+        .doc(userId);
+
+
+    const userDoc =
+      await userRef.get();
+
+
+    if (!userDoc.exists) {
+
+      console.error(
+        "Utilisateur Firestore introuvable :",
+        userId
+      );
+
+      return res.sendStatus(200);
+    }
+
+
+    // ==================================================
+    // 9. Génération du numéro de carte
+    // ==================================================
+
+    const cardNumber =
+      paymentData.cardNumber ||
+      await genererNumeroCarte();
+
+
+    // ==================================================
+    // 10. Paiement SUCCESS
+    // ==================================================
+
+    await paymentDoc.ref.update({
+
+      paymentStatus:
+        "paye",
+
+      status:
+        "valide",
+
+      cardNumber,
+
+      cardStatus:
+        "active",
+
+      transactionId:
+        data.id ||
+        data.transaction_id ||
+        null,
+
+      paymentDate:
+        admin.firestore.FieldValue.serverTimestamp(),
+
+      updatedAt:
+        admin.firestore.FieldValue.serverTimestamp()
+
+    });
+
+
+    // ==================================================
+    // 11. Activation de la carte fidélité
+    // ==================================================
+
+    await userRef.update({
+  hasFidelityCard: true,
+  cardNumber,
+  cardStatus: "active",
+  supportTier: paymentData.formule,
+  subscriptionActive: true,
   updatedAt:
     admin.firestore.FieldValue.serverTimestamp()
-
 });
 
 
-console.log(
-"Paiement mis à jour :",
-data.reference
-);
+    console.log(
+      "Paiement SUCCESS - carte activée :",
+      orderId
+    );
 
 
-}
+    return res.sendStatus(200);
 
 
+  } catch (error) {
 
-return res.sendStatus(200);
+    console.error(
+      "Erreur webhook NOKASH :",
+      error
+    );
 
-
-
-}catch(error){
-
-
-console.error(
-"Erreur webhook NOKASH :",
-error
-);
-
-
-return res.sendStatus(500);
-
-
-}
-
+    return res.sendStatus(500);
+  }
 
 });
-
-
-
+```
 
 // ==================================================
 // Création demande soutien
@@ -622,20 +812,21 @@ app.post("/create-payment-request", async (req, res) => {
         .toLowerCase();
 
 
-    if (
-      operateurNormalise === "mtn" ||
-      operateurNormalise === "mtn momo" ||
-      operateurNormalise === "mtn_mobile_money" ||
-      operateurNormalise === "mtn mobile money"
-    ) {
+   if (
+  operateurNormalise === "mtn" ||
+  operateurNormalise === "mtn momo" ||
+  operateurNormalise === "mtn_momo" ||
+  operateurNormalise === "mtn_mobile_money" ||
+  operateurNormalise === "mtn mobile money"
+) {
 
       paymentMethod = "MTN_MOMO";
 
-    } else if (
-      operateurNormalise === "orange" ||
-      operateurNormalise === "orange money" ||
-      operateurNormalise === "orange_money"
-    ) {
+  } else if (
+  operateurNormalise === "orange" ||
+  operateurNormalise === "orange money" ||
+  operateurNormalise === "orange_money"
+) {
 
       paymentMethod = "ORANGE_MONEY";
 
@@ -650,13 +841,7 @@ app.post("/create-payment-request", async (req, res) => {
     }
 
 
-    // ===============================
-    // Génération carte fidélité
-    // ===============================
-
-    const cardNumber =
-      await genererNumeroCarte();
-
+  
 
     // ===============================
     // Référence paiement
@@ -694,6 +879,32 @@ app.post("/create-payment-request", async (req, res) => {
         callbackUrl
 
       });
+      // ===============================
+// Vérification réponse NoKaSH
+// ===============================
+
+if (nokashResponse.status !== "REQUEST_OK") {
+
+    // ===============================
+    // Génération carte fidélité
+    // ===============================
+
+   
+
+
+  return res.status(400).json({
+
+    success: false,
+
+    message:
+      nokashResponse.message ||
+      "NoKaSH a refusé le paiement",
+
+    data: nokashResponse
+
+  });
+
+}
 
 
     // ===============================
@@ -703,8 +914,6 @@ app.post("/create-payment-request", async (req, res) => {
     const demande = {
 
       userId,
-
-      cardNumber,
 
       nom,
 
@@ -751,25 +960,17 @@ app.post("/create-payment-request", async (req, res) => {
     // Carte créée mais inactive
     // ===============================
 
-    await db
-      .collection("users")
-      .doc(userId)
-      .update({
-
-        hasFidelityCard: true,
-
-        cardNumber,
-
-        cardStatus: "inactive",
-
-        supportTier: formule,
-
-        subscriptionActive: false,
-
-        updatedAt:
-          admin.firestore.FieldValue.serverTimestamp()
-
-      });
+   await db
+  .collection("users")
+  .doc(userId)
+  .update({
+    hasFidelityCard: true,
+    supportTier: formule,
+    subscriptionActive: false,
+    cardStatus: "inactive",
+    updatedAt:
+      admin.firestore.FieldValue.serverTimestamp()
+  }); 
 
 
     // ===============================
@@ -782,7 +983,6 @@ app.post("/create-payment-request", async (req, res) => {
 
       id: doc.id,
 
-      cardNumber,
 
       paymentReference,
 
@@ -825,6 +1025,7 @@ app.post("/create-payment-request", async (req, res) => {
 // ===============================
 // Serveur
 // ===============================
+
 
 const PORT =
 process.env.PORT || 10000;
