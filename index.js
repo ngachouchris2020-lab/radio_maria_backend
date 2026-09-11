@@ -314,6 +314,10 @@ if (!orderId) {
     //
     // ==================================================
 
+    
+    console.log("orderId reçu =", orderId);
+console.log("status reçu =", status);
+
     const snapshot =
       await db
         .collection("payment_requests")
