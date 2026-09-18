@@ -1,11 +1,12 @@
 const axios = require("axios");
+const crypto = require("crypto");
 
 async function createPayment(data) {
   try {
 
     const url =
       `${process.env.NOKASH_API_URL}` +
-      `/lapas-on-trans/api-payin-request/407`;
+      `/lapas-on-trans/trans/api-payin-request/407`;
 
     // ==========================================
     // NORMALISATION DU NUMÉRO CAMEROUNAIS
@@ -33,6 +34,32 @@ async function createPayment(data) {
       );
 
     }
+
+    // ==========================================
+    // SIGNATURE HMAC NOKASH V407
+    // ==========================================
+
+    const signaturePayload =
+      `${data.reference}:${data.amount}:${phone}:${process.env.NOKASH_APPLICATION_KEY}`;
+
+    const hmacSignature =
+      crypto
+        .createHmac(
+          "sha256",
+          process.env.NOKASH_INTEGRATOR_KEY
+        )
+        .update(signaturePayload)
+        .digest("hex");
+
+    console.log(
+      "SIGNATURE PAYLOAD =",
+      signaturePayload
+    );
+
+    console.log(
+      "HMAC GENERATED =",
+      !!hmacSignature
+    );
 
     // ==========================================
     // PAYLOAD NOKASH
@@ -74,19 +101,29 @@ async function createPayment(data) {
     };
 
     // ==========================================
-    // LOG
+    // LOGS
     // ==========================================
 
     console.log(
       "NOKASH REQUEST :",
       {
         ...payload,
-
         i_space_key: "***",
-
         app_space_key: "***"
       }
     );
+
+    console.log("NOKASH CONFIG :", {
+      apiUrl: process.env.NOKASH_API_URL,
+      integratorPresent:
+        !!process.env.NOKASH_INTEGRATOR_KEY,
+      applicationPresent:
+        !!process.env.NOKASH_APPLICATION_KEY,
+      integratorLength:
+        process.env.NOKASH_INTEGRATOR_KEY?.length,
+      applicationLength:
+        process.env.NOKASH_APPLICATION_KEY?.length,
+    });
 
     // ==========================================
     // APPEL NOKASH
@@ -98,10 +135,9 @@ async function createPayment(data) {
         payload,
         {
           headers: {
-            "Content-Type":
-              "application/json"
+            "Content-Type": "application/json",
+            "hmac-signature": hmacSignature
           },
-
           timeout: 30000
         }
       );

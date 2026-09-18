@@ -968,7 +968,7 @@ if (nokashResponse.status !== "REQUEST_OK") {
   .collection("users")
   .doc(userId)
   .update({
-    hasFidelityCard: true,
+    
     supportTier: formule,
     subscriptionActive: false,
     cardStatus: "inactive",
