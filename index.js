@@ -394,35 +394,47 @@ console.log("status reçu =", status);
 
     if (status !== "SUCCESS") {
 
-      console.log(
-        "Paiement non réussi :",
-        status,
-        data.statusReason || ""
-      );
+  const reason =
+    data.statusReason || "UNKNOWN";
 
+  console.log(
+    "Paiement non réussi :",
+    status,
+    reason
+  );
 
-      // Le paiement FAILED reste non payé
-      // La carte reste inactive
+  await paymentDoc.ref.update({
 
-      await paymentDoc.ref.update({
+    nokashStatus:
+      status,
 
-        paymentStatus:
-          "failed",
+    statusReason:
+      reason,
 
-        status:
-          "paiement_echoue",
+    paymentStatus:
+      "failed",
 
-        cardStatus:
-          "inactive",
+    status:
+      "paiement_echoue",
 
-        updatedAt:
-          admin.firestore.FieldValue.serverTimestamp()
+    cardStatus:
+      "inactive",
 
-      });
+    nokashNotification:
+      data,
 
+    updatedAt:
+      admin.firestore.FieldValue.serverTimestamp()
 
-      return res.sendStatus(200);
-    }
+  });
+
+  console.log(
+    "Paiement FAILED enregistré dans Firestore :",
+    paymentDoc.id
+  );
+
+  return res.sendStatus(200);
+}
 
 
     // ==================================================
@@ -933,9 +945,10 @@ if (nokashResponse.status !== "REQUEST_OK") {
 
       status: "paiement_initie",
 
-      paymentStatus: "pending",
-
-      cardStatus: "inactive",
+     paymentStatus: "pending",
+nokashStatus: nokashResponse.data?.status || "PENDING",
+statusReason: null,
+cardStatus: "inactive",
 
       paymentReference,
 
