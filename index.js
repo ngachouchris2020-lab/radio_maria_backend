@@ -1551,6 +1551,10 @@ app.post(
         "Réponse NoKaSH service :",
         nokashResponse
       );
+      console.log("======================================");
+console.log("NO KASH PAYMENT RESPONSE");
+console.log(JSON.stringify(nokashResponse, null, 2));
+console.log("======================================");
 
       // ==================================================
       // NOKASH REFUSE
