@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 console.log(
   "PROJECT_ID =",
   process.env.FIREBASE_PROJECT_ID
@@ -15,19 +16,16 @@ const admin = require("firebase-admin");
 
 const app = express();
 
-
-// ===============================
-// Middlewares
-// ===============================
+// ==================================================
+// MIDDLEWARES
+// ==================================================
 
 app.use(cors());
 app.use(express.json());
 
-
-
-// ===============================
-// Firebase Admin Configuration
-// ===============================
+// ==================================================
+// FIREBASE ADMIN
+// ==================================================
 
 try {
 
@@ -62,28 +60,20 @@ try {
 
 }
 
-
-
 const db = admin.firestore();
 
-
-
-// ===============================
+// ==================================================
 // NOKASH SERVICE
-// ===============================
+// ==================================================
 
 const {
   createPayment
 } = require("./services/nokash.service");
 
-
-
 console.log(
   "NOKASH_API_URL =",
   process.env.NOKASH_API_URL
 );
-
-
 
 console.log(
   "NOKASH_INTEGRATOR_KEY =",
@@ -99,11 +89,9 @@ console.log(
     : "MISSING"
 );
 
-
-
-// ===============================
-// Test serveur
-// ===============================
+// ==================================================
+// TEST SERVEUR
+// ==================================================
 
 app.get("/", (req, res) => {
 
@@ -113,155 +101,130 @@ app.get("/", (req, res) => {
 
 });
 
-
-
-
 // ==================================================
-// Création paiement NOKASH
-// Préparé pour recevoir les vraies clés API plus tard
+// ==================================================
+// PAIEMENT CARTE DE FIDELITE
+// ==================================================
 // ==================================================
 
 app.post("/create-payment", async (req, res) => {
 
-
   try {
 
-
     const {
-
       nom,
-
       telephone,
-
       montant,
-
       formule
-
     } = req.body;
 
-
-
-    if(
+    if (
       !nom ||
       !telephone ||
       !montant ||
       !formule
-    ){
+    ) {
 
       return res.status(400).json({
 
-        success:false,
+        success: false,
 
         message:
-        "Informations paiement incomplètes"
+          "Informations paiement incomplètes"
 
       });
 
     }
 
-
-
     const reference =
       "RM-" + Date.now();
-
-
 
     const nokashResponse =
       await createPayment({
 
-        amount:Number(montant),
+        amount: Number(montant),
 
-        phone:telephone,
+        phone: telephone,
 
-        description:formule,
-
-        reference
-
-      });
-
-
-
-    const doc =
-      await db
-      .collection("payment_requests")
-      .add({
-
-        nom,
-
-        telephone,
-
-        montant:Number(montant),
-
-        formule,
-
+        description: formule,
 
         reference,
 
+        paymentMethod:
+          "MTN_MOMO",
 
-        status:
-        "paiement_initie",
-
-
-        paymentStatus:
-        "en_attente",
-
-
-        nokashResponse,
-
-
-        createdAt:
-        admin.firestore.FieldValue.serverTimestamp()
+        callbackUrl:
+          "https://radio-maria-backend.onrender.com/nokash-webhook"
 
       });
 
+    const doc =
+      await db
+        .collection("payment_requests")
+        .add({
 
+          nom,
+
+          telephone,
+
+          montant:
+            Number(montant),
+
+          formule,
+
+          reference,
+
+          status:
+            "paiement_initie",
+
+          paymentStatus:
+            "en_attente",
+
+          nokashResponse,
+
+          createdAt:
+            admin.firestore.FieldValue.serverTimestamp()
+
+        });
 
     return res.json({
 
-      success:true,
+      success: true,
 
-      id:doc.id,
+      id: doc.id,
 
       reference,
 
-      data:nokashResponse
+      data: nokashResponse
 
     });
 
-
-
-  } catch(error) {
-
+  } catch (error) {
 
     console.error(
       "Erreur création paiement NOKASH :",
+      error.response?.data ||
+      error.message ||
       error
     );
 
-
-
     return res.status(500).json({
 
-      success:false,
+      success: false,
 
       message:
-      "Erreur création paiement"
+        "Erreur création paiement"
 
     });
 
-
   }
-
 
 });
 
-
-
-
-
+// ==================================================
 // ==================================================
 // WEBHOOK NOKASH
-// NOKASH appelle cette route après paiement
+// ==================================================
 // ==================================================
 
 app.post("/nokash-webhook", async (req, res) => {
@@ -271,54 +234,63 @@ app.post("/nokash-webhook", async (req, res) => {
     const data = req.body;
 
     console.log(
-      "Notification NOKASH :",
-      data
+      "======================================"
     );
 
+    console.log(
+      "NOTIFICATION NOKASH"
+    );
+
+    console.log(
+      JSON.stringify(
+        data,
+        null,
+        2
+      )
+    );
+
+    console.log(
+      "======================================"
+    );
 
     // ==================================================
-    // 1. Récupération de l'identifiant NoKaSH
+    // 1. IDENTIFIANT PAIEMENT
     // ==================================================
 
-   const orderId =
-  data.orderId ||
-  data.order_id ||
-  data.reference ||
-  data.paymentReference;
+    const orderId =
+      data.orderId ||
+      data.order_id ||
+      data.reference ||
+      data.paymentReference;
 
-const status =
-  data.status ||
-  data.payment_status;
+    const status =
+      data.status ||
+      data.payment_status;
 
+    if (!orderId) {
 
-if (!orderId) {
-  console.error(
-    "Webhook NOKASH : orderId manquant. Payload reçu :",
-    JSON.stringify(data, null, 2)
-  );
+      console.error(
+        "Webhook NOKASH : orderId manquant"
+      );
 
-  return res.sendStatus(400);
-}
+      return res.sendStatus(400);
+    }
+
+    console.log(
+      "orderId reçu =",
+      orderId
+    );
+
+    console.log(
+      "status reçu =",
+      status
+    );
 
     // ==================================================
-    // 2. Recherche du paiement dans Firestore
-    // ==================================================
-    //
-    // NoKaSH envoie :
-    //
-    // orderId: "RM-..."
-    //
-    // Notre Firestore contient :
-    //
-    // paymentReference: "RM-..."
-    //
+    // 2. RECHERCHE PAIEMENT CARTE FIDELITE
     // ==================================================
 
-    
-    console.log("orderId reçu =", orderId);
-console.log("status reçu =", status);
-
-    const snapshot =
+    const paymentSnapshot =
       await db
         .collection("payment_requests")
         .where(
@@ -329,44 +301,237 @@ console.log("status reçu =", status);
         .limit(1)
         .get();
 
-
     // ==================================================
-    // 3. Paiement introuvable
+    // 3. SI PAIEMENT CARTE TROUVE
     // ==================================================
 
-    if (snapshot.empty) {
+    if (!paymentSnapshot.empty) {
 
-      console.error(
-        "Paiement introuvable pour orderId :",
+      const paymentDoc =
+        paymentSnapshot.docs[0];
+
+      const paymentData =
+        paymentDoc.data();
+
+      console.log(
+        "Paiement carte fidélité trouvé :",
+        paymentDoc.id
+      );
+
+      await paymentDoc.ref.update({
+
+        nokashStatus:
+          status,
+
+        statusReason:
+          data.statusReason || null,
+
+        transactionId:
+          data.id ||
+          data.transaction_id ||
+          null,
+
+        nokashNotification:
+          data,
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      });
+
+      // ==================================================
+      // ECHEC CARTE
+      // ==================================================
+
+      if (status !== "SUCCESS") {
+
+        const reason =
+          data.statusReason ||
+          "UNKNOWN";
+
+        await paymentDoc.ref.update({
+
+          paymentStatus:
+            "failed",
+
+          status:
+            "paiement_echoue",
+
+          cardStatus:
+            "inactive",
+
+          statusReason:
+            reason,
+
+          updatedAt:
+            admin.firestore.FieldValue.serverTimestamp()
+
+        });
+
+        console.log(
+          "Paiement carte échoué :",
+          paymentDoc.id
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // ==================================================
+      // USER ID
+      // ==================================================
+
+      const userId =
+        paymentData.userId;
+
+      if (!userId) {
+
+        console.error(
+          "Paiement SUCCESS mais userId manquant"
+        );
+
+        return res.sendStatus(200);
+      }
+
+      const userRef =
+        db
+          .collection("users")
+          .doc(userId);
+
+      const userDoc =
+        await userRef.get();
+
+      if (!userDoc.exists) {
+
+        console.error(
+          "Utilisateur introuvable :",
+          userId
+        );
+
+        return res.sendStatus(200);
+      }
+
+      // ==================================================
+      // NUMERO CARTE
+      // ==================================================
+
+      const cardNumber =
+        paymentData.cardNumber ||
+        await genererNumeroCarte();
+
+      // ==================================================
+      // PAIEMENT SUCCESS
+      // ==================================================
+
+      await paymentDoc.ref.update({
+
+        paymentStatus:
+          "paye",
+
+        status:
+          "valide",
+
+        cardNumber,
+
+        cardStatus:
+          "active",
+
+        transactionId:
+          data.id ||
+          data.transaction_id ||
+          null,
+
+        paymentDate:
+          admin.firestore.FieldValue.serverTimestamp(),
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      });
+
+      // ==================================================
+      // ACTIVATION CARTE
+      // ==================================================
+
+      await userRef.update({
+
+        hasFidelityCard:
+          true,
+
+        cardNumber,
+
+        cardStatus:
+          "active",
+
+        supportTier:
+          paymentData.formule,
+
+        subscriptionActive:
+          true,
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      });
+
+      console.log(
+        "Paiement SUCCESS - carte activée :",
         orderId
       );
 
       return res.sendStatus(200);
     }
 
+    // ==================================================
+    // ==================================================
+    // RECHERCHE PAIEMENT SERVICE SPIRITUEL
+    // ==================================================
+    // ==================================================
+
+    const serviceSnapshot =
+      await db
+        .collection("demandes_services")
+        .where(
+          "paymentReference",
+          "==",
+          orderId
+        )
+        .limit(1)
+        .get();
 
     // ==================================================
-    // 4. Récupération du paiement
+    // PAIEMENT SERVICE INTROUVABLE
     // ==================================================
 
-    const paymentDoc =
-      snapshot.docs[0];
+    if (serviceSnapshot.empty) {
 
-    const paymentData =
-      paymentDoc.data();
+      console.error(
+        "Aucun paiement trouvé pour orderId :",
+        orderId
+      );
 
+      return res.sendStatus(200);
+    }
+
+    // ==================================================
+    // DEMANDE SERVICE
+    // ==================================================
+
+    const serviceDoc =
+      serviceSnapshot.docs[0];
+
+    const serviceData =
+      serviceDoc.data();
 
     console.log(
-      "Paiement trouvé :",
-      paymentDoc.id
+      "Paiement service spirituel trouvé :",
+      serviceDoc.id
     );
 
-
     // ==================================================
-    // 5. Mise à jour du paiement
+    // MISE A JOUR NOKASH
     // ==================================================
 
-    await paymentDoc.ref.update({
+    await serviceDoc.ref.update({
 
       nokashStatus:
         status,
@@ -387,132 +552,64 @@ console.log("status reçu =", status);
 
     });
 
-
     // ==================================================
-    // 6. SI LE PAIEMENT N'EST PAS SUCCESS
+    // PAIEMENT SERVICE ECHEC
     // ==================================================
 
     if (status !== "SUCCESS") {
 
-  const reason =
-    data.statusReason || "UNKNOWN";
+      const reason =
+        data.statusReason ||
+        "UNKNOWN";
 
-  console.log(
-    "Paiement non réussi :",
-    status,
-    reason
-  );
+      await serviceDoc.ref.update({
 
-  await paymentDoc.ref.update({
+        paymentStatus:
+          "failed",
 
-    nokashStatus:
-      status,
+        statut:
+          "payment_failed",
 
-    statusReason:
-      reason,
+        statusReason:
+          reason,
 
-    paymentStatus:
-      "failed",
+        datePaiement:
+          null,
 
-    status:
-      "paiement_echoue",
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
 
-    cardStatus:
-      "inactive",
+      });
 
-    nokashNotification:
-      data,
-
-    updatedAt:
-      admin.firestore.FieldValue.serverTimestamp()
-
-  });
-
-  console.log(
-    "Paiement FAILED enregistré dans Firestore :",
-    paymentDoc.id
-  );
-
-  return res.sendStatus(200);
-}
-
-
-    // ==================================================
-    // 7. Vérification du userId
-    // ==================================================
-
-    const userId =
-      paymentData.userId;
-
-
-    if (!userId) {
-
-      console.error(
-        "Paiement SUCCESS mais userId manquant :",
-        orderId
+      console.log(
+        "Paiement service échoué :",
+        serviceDoc.id
       );
 
       return res.sendStatus(200);
     }
 
-
     // ==================================================
-    // 8. Vérification de l'utilisateur
-    // ==================================================
-
-    const userRef =
-      db
-        .collection("users")
-        .doc(userId);
-
-
-    const userDoc =
-      await userRef.get();
-
-
-    if (!userDoc.exists) {
-
-      console.error(
-        "Utilisateur Firestore introuvable :",
-        userId
-      );
-
-      return res.sendStatus(200);
-    }
-
-
-    // ==================================================
-    // 9. Génération du numéro de carte
+    // PAIEMENT SERVICE SUCCESS
     // ==================================================
 
-    const cardNumber =
-      paymentData.cardNumber ||
-      await genererNumeroCarte();
-
-
-    // ==================================================
-    // 10. Paiement SUCCESS
-    // ==================================================
-
-    await paymentDoc.ref.update({
+    await serviceDoc.ref.update({
 
       paymentStatus:
-        "paye",
+        "paid",
 
-      status:
-        "valide",
+      statut:
+        "paid",
 
-      cardNumber,
-
-      cardStatus:
-        "active",
+      paymentStatusLabel:
+        "Paiement confirmé",
 
       transactionId:
         data.id ||
         data.transaction_id ||
         null,
 
-      paymentDate:
+      datePaiement:
         admin.firestore.FieldValue.serverTimestamp(),
 
       updatedAt:
@@ -520,30 +617,47 @@ console.log("status reçu =", status);
 
     });
 
-
     // ==================================================
-    // 11. Activation de la carte fidélité
+    // NOTIFICATION UTILISATEUR
     // ==================================================
 
-    await userRef.update({
-  hasFidelityCard: true,
-  cardNumber,
-  cardStatus: "active",
-  supportTier: paymentData.formule,
-  subscriptionActive: true,
-  updatedAt:
-    admin.firestore.FieldValue.serverTimestamp()
-});
+    if (serviceData.userId) {
 
+      await db
+        .collection("notifications")
+        .add({
+
+          userId:
+            serviceData.userId,
+
+          title:
+            "Paiement confirmé",
+
+          message:
+            `Votre paiement pour le service "${serviceData.service}" a bien été confirmé.`,
+
+          type:
+            "paiement_service_confirme",
+
+          demandeId:
+            serviceDoc.id,
+
+          isRead:
+            false,
+
+          dateCreation:
+            admin.firestore.FieldValue.serverTimestamp()
+
+        });
+
+    }
 
     console.log(
-      "Paiement SUCCESS - carte activée :",
-      orderId
+      "Paiement SERVICE SUCCESS :",
+      serviceDoc.id
     );
 
-
     return res.sendStatus(200);
-
 
   } catch (error) {
 
@@ -557,560 +671,1023 @@ console.log("status reçu =", status);
 
 });
 
-
 // ==================================================
-// Création demande soutien
 // ==================================================
-
-app.post("/create-support-request", async (req,res)=>{
-
-
-try {
-
-
-const {
-
-nom,
-
-telephone,
-
-ville,
-
-formule,
-
-montant
-
-
-}=req.body;
-
-
-
-if(
-!nom ||
-!telephone ||
-!ville ||
-!formule ||
-!montant
-){
-
-
-return res.status(400).json({
-
-success:false,
-
-message:
-"Informations incomplètes"
-
-});
-
-
-}
-
-
-
-const demande = {
-
-
-nom,
-
-
-telephone,
-
-
-ville,
-
-
-formule,
-
-
-montant:Number(montant),
-
-
-statut:
-"en_attente",
-
-
-createdAt:
-admin.firestore.FieldValue.serverTimestamp()
-
-
-};
-
-
-
-
-const doc =
-await db
-.collection("demandes_soutien")
-.add(demande);
-
-
-
-
-return res.json({
-
-success:true,
-
-id:doc.id,
-
-message:
-"Demande enregistrée avec succès"
-
-});
-
-
-
-}catch(error){
-
-
-console.error(
-"Erreur création demande :",
-error
-);
-
-
-return res.status(500).json({
-
-success:false,
-
-message:
-"Erreur serveur"
-
-});
-
-
-}
-
-
-
-});
-
-
-
-
+// CREATION DEMANDE SOUTIEN
 // ==================================================
-// Génération numéro carte fidélité
 // ==================================================
 
-async function genererNumeroCarte(){
+app.post(
+  "/create-support-request",
+  async (req, res) => {
 
+    try {
 
-const anneeActuelle =
-new Date().getFullYear();
+      const {
+        nom,
+        telephone,
+        ville,
+        formule,
+        montant
+      } = req.body;
 
+      if (
+        !nom ||
+        !telephone ||
+        !ville ||
+        !formule ||
+        !montant
+      ) {
 
+        return res.status(400).json({
 
-const counterRef =
-db.collection("counters")
-.doc("cardNumber");
+          success: false,
 
+          message:
+            "Informations incomplètes"
 
+        });
 
-const nouveauNumero =
-await db.runTransaction(
-async(transaction)=>{
+      }
 
+      const demande = {
 
-const doc =
-await transaction.get(counterRef);
+        nom,
 
+        telephone,
 
+        ville,
 
-let valeur = 1;
+        formule,
 
-
-
-if(doc.exists){
-
-
-const data =
-doc.data();
-
-
-
-if(data.annee === anneeActuelle){
-
-valeur =
-data.valeur + 1;
-
-}
-
-
-}
-
-
-
-transaction.set(
-counterRef,
-{
-
-annee:
-anneeActuelle,
-
-valeur
-
-}
-
-);
-
-
-
-return valeur;
-
-
-
-});
-
-
-
-const numero =
-String(nouveauNumero)
-.padStart(6,"0");
-
-
-
-return `RM-${anneeActuelle}-${numero}`;
-
-
-}
-
-
-
-
-// ==================================================
-// Demande soutien avec carte fidélité
-// ==================================================
-
-app.post("/create-payment-request", async (req, res) => {
-
-  try {
-
-    const {
-      userId,
-      nom,
-      telephone,
-      formule,
-      montant,
-      operateur
-    } = req.body;
-
-
-    // ===============================
-    // Vérification des informations
-    // ===============================
-
-    if (
-      !userId ||
-      !nom ||
-      !telephone ||
-      !formule ||
-      !montant ||
-      !operateur
-    ) {
-
-      return res.status(400).json({
-        success: false,
-        message: "Informations incomplètes"
-      });
-
-    }
-
-
-    // ===============================
-    // Conversion opérateur
-    // ===============================
-
-    let paymentMethod;
-
-    const operateurNormalise =
-      String(operateur)
-        .trim()
-        .toLowerCase();
-
-
-   if (
-  operateurNormalise === "mtn" ||
-  operateurNormalise === "mtn momo" ||
-  operateurNormalise === "mtn_momo" ||
-  operateurNormalise === "mtn_mobile_money" ||
-  operateurNormalise === "mtn mobile money"
-) {
-
-      paymentMethod = "MTN_MOMO";
-
-  } else if (
-  operateurNormalise === "orange" ||
-  operateurNormalise === "orange money" ||
-  operateurNormalise === "orange_money"
-) {
-
-      paymentMethod = "ORANGE_MONEY";
-
-    } else {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Opérateur de paiement non pris en charge"
-      });
-
-    }
-
-
-  
-
-    // ===============================
-    // Référence paiement
-    // ===============================
-
-    const paymentReference =
-      "RM-" + Date.now();
-
-
-    // ===============================
-    // URL webhook
-    // ===============================
-
-    const callbackUrl =
-      "https://radio-maria-backend.onrender.com/nokash-webhook";
-
-
-    // ===============================
-    // Création paiement NoKaSH
-    // ===============================
-
-    const nokashResponse =
-      await createPayment({
-
-        amount: Number(montant),
-
-        phone: String(telephone),
-
-        description: formule,
-
-        reference: paymentReference,
-
-        paymentMethod,
-
-        callbackUrl
-
-      });
-      // ===============================
-// Vérification réponse NoKaSH
-// ===============================
-
-if (nokashResponse.status !== "REQUEST_OK") {
-
-    // ===============================
-    // Génération carte fidélité
-    // ===============================
-
-   
-
-
-  return res.status(400).json({
-
-    success: false,
-
-    message:
-      nokashResponse.message ||
-      "NoKaSH a refusé le paiement",
-
-    data: nokashResponse
-
-  });
-
-}
-
-
-    // ===============================
-    // Enregistrement paiement
-    // ===============================
-
-    const demande = {
-
-      userId,
-
-      nom,
-
-      telephone: String(telephone),
-
-      formule,
-
-      montant: Number(montant),
-
-      operateur,
-
-      paymentMethod,
-
-      status: "paiement_initie",
-
-     paymentStatus: "pending",
-nokashStatus: nokashResponse.data?.status || "PENDING",
-statusReason: null,
-cardStatus: "inactive",
-
-      paymentReference,
-
-      nokashResponse,
-
-      dateCreation:
-        admin.firestore.FieldValue.serverTimestamp(),
-
-      createdAt:
-        admin.firestore.FieldValue.serverTimestamp(),
-
-      updatedAt:
-        admin.firestore.FieldValue.serverTimestamp()
-
-    };
-
-
-    const doc =
-      await db
-        .collection("payment_requests")
-        .add(demande);
-
-
-    // ===============================
-    // Mise à jour utilisateur
-    // Carte créée mais inactive
-    // ===============================
-
-   await db
-  .collection("users")
-  .doc(userId)
-  .update({
-    
-    supportTier: formule,
-    subscriptionActive: false,
-    cardStatus: "inactive",
-    updatedAt:
-      admin.firestore.FieldValue.serverTimestamp()
-  }); 
-
-
-    // ===============================
-    // Réponse
-    // ===============================
-
-    return res.json({
-
-      success: true,
-
-      id: doc.id,
-
-
-      paymentReference,
-
-      paymentMethod,
-
-      data: nokashResponse,
-
-      message:
-        "Paiement initié avec succès"
-
-    });
-
-
-  } catch (error) {
-
-    console.error(
-      "Erreur payment_request :",
-      error.response?.data ||
-      error.message ||
-      error
-    );
-
-
-    return res.status(500).json({
-
-      success: false,
-
-      message:
-        "Erreur lors de l'initialisation du paiement"
-
-    });
-
-  }
-
-});
-
-
-
-
-// ===============================
-// Serveur
-// ===============================
-
-
-const PORT =
-process.env.PORT || 10000;
-
-
-
-app.listen(PORT,()=>{
-
-
-console.log(
-
-`Serveur lancé sur le port ${PORT}`
-
-);
-
-
-});
-app.post("/create-service-request", async (req, res) => {
-  try {
-
-    const {
-      userId,
-      label,
-      price,
-      description,
-      telephone,
-      paymentMethod
-    } = req.body;
-
-    if (!label || !description) {
-      return res.status(400).json({
-        success: false,
-        message: "Informations incomplètes"
-      });
-    }
-
-    const doc = await db
-      .collection("demandes_services")
-      .add({
-        userId: userId || null,
-        service: label,
-        montant: price,
-        description,
-        telephone: telephone || null,
-        paymentMethod: paymentMethod || null,
+        montant:
+          Number(montant),
 
         statut:
-          price === "GRATUIT"
-            ? "en_attente"
-            : "paiement_requis",
+          "en_attente",
 
         createdAt:
           admin.firestore.FieldValue.serverTimestamp()
+
+      };
+
+      const doc =
+        await db
+          .collection("demandes_soutien")
+          .add(demande);
+
+      return res.json({
+
+        success: true,
+
+        id: doc.id,
+
+        message:
+          "Demande enregistrée avec succès"
+
       });
 
-    return res.json({
-      success: true,
-      id: doc.id
-    });
+    } catch (error) {
 
-  } catch (error) {
+      console.error(
+        "Erreur création demande :",
+        error
+      );
 
-    console.error(error);
+      return res.status(500).json({
 
-    return res.status(500).json({
-      success: false,
-      message: "Erreur serveur"
-    });
+        success: false,
+
+        message:
+          "Erreur serveur"
+
+      });
+
+    }
 
   }
-});
+);
+
+// ==================================================
+// ==================================================
+// GENERATION CARTE FIDELITE
+// ==================================================
+// ==================================================
+
+async function genererNumeroCarte() {
+
+  const anneeActuelle =
+    new Date().getFullYear();
+
+  const counterRef =
+    db
+      .collection("counters")
+      .doc("cardNumber");
+
+  const nouveauNumero =
+    await db.runTransaction(
+      async (transaction) => {
+
+        const doc =
+          await transaction.get(
+            counterRef
+          );
+
+        let valeur = 1;
+
+        if (doc.exists) {
+
+          const data =
+            doc.data();
+
+          if (
+            data.annee ===
+            anneeActuelle
+          ) {
+
+            valeur =
+              data.valeur + 1;
+
+          }
+
+        }
+
+        transaction.set(
+          counterRef,
+          {
+
+            annee:
+              anneeActuelle,
+
+            valeur
+
+          }
+        );
+
+        return valeur;
+
+      }
+    );
+
+  const numero =
+    String(nouveauNumero)
+      .padStart(6, "0");
+
+  return `RM-${anneeActuelle}-${numero}`;
+}
+
+// ==================================================
+// ==================================================
+// PAIEMENT CARTE FIDELITE
+// ==================================================
+// ==================================================
+
+app.post(
+  "/create-payment-request",
+  async (req, res) => {
+
+    try {
+
+      const {
+        userId,
+        nom,
+        telephone,
+        formule,
+        montant,
+        operateur
+      } = req.body;
+
+      if (
+        !userId ||
+        !nom ||
+        !telephone ||
+        !formule ||
+        !montant ||
+        !operateur
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Informations incomplètes"
+
+        });
+
+      }
+
+      // ==================================================
+      // OPERATEUR
+      // ==================================================
+
+      let paymentMethod;
+
+      const operateurNormalise =
+        String(operateur)
+          .trim()
+          .toLowerCase();
+
+      if (
+        operateurNormalise === "mtn" ||
+        operateurNormalise === "mtn momo" ||
+        operateurNormalise === "mtn_momo" ||
+        operateurNormalise === "mtn_mobile_money" ||
+        operateurNormalise === "mtn mobile money"
+      ) {
+
+        paymentMethod =
+          "MTN_MOMO";
+
+      } else if (
+        operateurNormalise === "orange" ||
+        operateurNormalise === "orange money" ||
+        operateurNormalise === "orange_money"
+      ) {
+
+        paymentMethod =
+          "ORANGE_MONEY";
+
+      } else {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Opérateur de paiement non pris en charge"
+
+        });
+
+      }
+
+      // ==================================================
+      // REFERENCE
+      // ==================================================
+
+      const paymentReference =
+        "RM-" + Date.now();
+
+      const callbackUrl =
+        "https://radio-maria-backend.onrender.com/nokash-webhook";
+
+      // ==================================================
+      // NOKASH
+      // ==================================================
+
+      const nokashResponse =
+        await createPayment({
+
+          amount:
+            Number(montant),
+
+          phone:
+            String(telephone),
+
+          description:
+            formule,
+
+          reference:
+            paymentReference,
+
+          paymentMethod,
+
+          callbackUrl
+
+        });
+
+      // ==================================================
+      // VERIFICATION NOKASH
+      // ==================================================
+
+      if (
+        nokashResponse.status !==
+        "REQUEST_OK"
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            nokashResponse.message ||
+            "NoKaSH a refusé le paiement",
+
+          data:
+            nokashResponse
+
+        });
+
+      }
+
+      // ==================================================
+      // ENREGISTREMENT
+      // ==================================================
+
+      const demande = {
+
+        userId,
+
+        nom,
+
+        telephone:
+          String(telephone),
+
+        formule,
+
+        montant:
+          Number(montant),
+
+        operateur,
+
+        paymentMethod,
+
+        status:
+          "paiement_initie",
+
+        paymentStatus:
+          "pending",
+
+        nokashStatus:
+          nokashResponse.data?.status ||
+          "PENDING",
+
+        statusReason:
+          null,
+
+        cardStatus:
+          "inactive",
+
+        paymentReference,
+
+        nokashResponse,
+
+        dateCreation:
+          admin.firestore.FieldValue.serverTimestamp(),
+
+        createdAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      };
+
+      const doc =
+        await db
+          .collection("payment_requests")
+          .add(demande);
+
+      // ==================================================
+      // UTILISATEUR
+      // ==================================================
+
+      await db
+        .collection("users")
+        .doc(userId)
+        .update({
+
+          supportTier:
+            formule,
+
+          subscriptionActive:
+            false,
+
+          cardStatus:
+            "inactive",
+
+          updatedAt:
+            admin.firestore.FieldValue.serverTimestamp()
+
+        });
+
+      return res.json({
+
+        success: true,
+
+        id:
+          doc.id,
+
+        paymentReference,
+
+        paymentMethod,
+
+        data:
+          nokashResponse,
+
+        message:
+          "Paiement initié avec succès"
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erreur payment_request :",
+        error.response?.data ||
+        error.message ||
+        error
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Erreur lors de l'initialisation du paiement"
+
+      });
+
+    }
+
+  }
+);
+
+// ==================================================
+// ==================================================
+// CREATION DEMANDE SERVICE SPIRITUEL
+// ==================================================
+// ==================================================
+
+app.post(
+  "/create-service-request",
+  async (req, res) => {
+
+    try {
+
+      const {
+        userId,
+        label,
+        price,
+        description,
+        telephone,
+        paymentMethod
+      } = req.body;
+
+      if (
+        !label ||
+        !description
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Informations incomplètes"
+
+        });
+
+      }
+
+      // ==================================================
+      // CONVERSION DU PRIX
+      // ==================================================
+
+      let montant = 0;
+
+      if (
+        price &&
+        String(price)
+          .toUpperCase() !==
+          "GRATUIT"
+      ) {
+
+        montant =
+          Number(
+            String(price)
+              .replace(/\s/g, "")
+              .replace("FCFA", "")
+              .trim()
+          );
+
+        if (
+          !Number.isFinite(montant) ||
+          montant <= 0
+        ) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            message:
+              "Montant du service invalide"
+
+          });
+
+        }
+
+      }
+
+      const estGratuit =
+        String(price)
+          .trim()
+          .toUpperCase() ===
+        "GRATUIT";
+
+      // ==================================================
+      // CREATION FIRESTORE
+      // ==================================================
+
+      const demandeData = {
+
+        userId:
+          userId || null,
+
+        service:
+          label,
+
+        montant,
+
+        prixAffiche:
+          price,
+
+        description,
+
+        telephone:
+          telephone || null,
+
+        paymentMethod:
+          paymentMethod || null,
+
+        statut:
+          estGratuit
+            ? "en_attente"
+            : "paiement_requis",
+
+        paymentStatus:
+          estGratuit
+            ? "non_requis"
+            : "non_demarre",
+
+        paymentReference:
+          null,
+
+        nokashStatus:
+          null,
+
+        transactionId:
+          null,
+
+        statusReason:
+          null,
+
+        datePaiement:
+          null,
+
+        createdAt:
+          admin.firestore.FieldValue.serverTimestamp(),
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      };
+
+      const doc =
+        await db
+          .collection("demandes_services")
+          .add(
+            demandeData
+          );
+
+      console.log(
+        "Demande service créée :",
+        doc.id
+      );
+
+      // ==================================================
+      // NOTIFICATION ADMIN
+      // ==================================================
+
+      if (userId) {
+
+        await db
+          .collection("admin_notifications")
+          .add({
+
+            title:
+              "Nouvelle demande de service",
+
+            message:
+              `${label} - nouvelle demande reçue`,
+
+            type:
+              "nouvelle_demande_service",
+
+            demandeId:
+              doc.id,
+
+            userId,
+
+            isRead:
+              false,
+
+            dateCreation:
+              admin.firestore.FieldValue.serverTimestamp()
+
+          });
+
+      }
+
+      // ==================================================
+      // NOTIFICATION UTILISATEUR
+      // ==================================================
+
+      if (userId) {
+
+        await db
+          .collection("notifications")
+          .add({
+
+            userId,
+
+            title:
+              "Demande créée",
+
+            message:
+              `Votre demande "${label}" a bien été enregistrée.`,
+
+            type:
+              "demande_service_creee",
+
+            demandeId:
+              doc.id,
+
+            isRead:
+              false,
+
+            dateCreation:
+              admin.firestore.FieldValue.serverTimestamp()
+
+          });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        id:
+          doc.id,
+
+        message:
+          "Demande de service créée avec succès"
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erreur create-service-request :",
+        error
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Erreur serveur"
+
+      });
+
+    }
+
+  }
+);
+
+// ==================================================
+// ==================================================
+// INITIATION PAIEMENT SERVICE SPIRITUEL
+// ==================================================
+// ==================================================
+
+app.post(
+  "/initiate-payment",
+  async (req, res) => {
+
+    try {
+
+      const {
+        demandeId
+      } = req.body;
+
+      // ==================================================
+      // VALIDATION
+      // ==================================================
+
+      if (!demandeId) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "demandeId manquant"
+
+        });
+
+      }
+
+      // ==================================================
+      // RECUPERATION DEMANDE
+      // ==================================================
+
+      const demandeRef =
+        db
+          .collection("demandes_services")
+          .doc(demandeId);
+
+      const demandeDoc =
+        await demandeRef.get();
+
+      if (!demandeDoc.exists) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          message:
+            "Demande de service introuvable"
+
+        });
+
+      }
+
+      const demande =
+        demandeDoc.data();
+
+      // ==================================================
+      // VERIFICATION MONTANT
+      // ==================================================
+
+      const montant =
+        Number(demande.montant);
+
+      if (
+        !Number.isFinite(montant) ||
+        montant <= 0
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Montant du service invalide"
+
+        });
+
+      }
+
+      // ==================================================
+      // TELEPHONE
+      // ==================================================
+
+      if (!demande.telephone) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Numéro Mobile Money manquant"
+
+        });
+
+      }
+
+      // ==================================================
+      // OPERATEUR
+      // ==================================================
+
+      const operateur =
+        String(
+          demande.paymentMethod || ""
+        )
+          .trim()
+          .toLowerCase();
+
+      let paymentMethod;
+
+      if (
+        operateur === "mtn" ||
+        operateur === "momo" ||
+        operateur === "mtn momo" ||
+        operateur === "mtn_momo"
+      ) {
+
+        paymentMethod =
+          "MTN_MOMO";
+
+      } else if (
+        operateur === "orange" ||
+        operateur === "orange money" ||
+        operateur === "orange_money"
+      ) {
+
+        paymentMethod =
+          "ORANGE_MONEY";
+
+      } else {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Méthode de paiement invalide"
+
+        });
+
+      }
+
+      // ==================================================
+      // REFERENCE UNIQUE
+      // ==================================================
+
+      const paymentReference =
+        "RM-SERVICE-" +
+        Date.now();
+
+      const callbackUrl =
+        "https://radio-maria-backend.onrender.com/nokash-webhook";
+
+      // ==================================================
+      // APPEL NOKASH
+      // ==================================================
+
+      console.log(
+        "Initialisation paiement service :",
+        {
+          demandeId,
+          montant,
+          paymentMethod
+        }
+      );
+
+      const nokashResponse =
+        await createPayment({
+
+          amount:
+            montant,
+
+          phone:
+            String(demande.telephone),
+
+          description:
+            demande.service,
+
+          reference:
+            paymentReference,
+
+          paymentMethod,
+
+          callbackUrl
+
+        });
+
+      console.log(
+        "Réponse NoKaSH service :",
+        nokashResponse
+      );
+
+      // ==================================================
+      // NOKASH REFUSE
+      // ==================================================
+
+      if (
+        nokashResponse.status !==
+        "REQUEST_OK"
+      ) {
+
+        await demandeRef.update({
+
+          paymentStatus:
+            "failed",
+
+          statut:
+            "payment_failed",
+
+          nokashStatus:
+            nokashResponse.status ||
+            "FAILED",
+
+          statusReason:
+            nokashResponse.message ||
+            "NoKaSH a refusé le paiement",
+
+          nokashResponse,
+
+          updatedAt:
+            admin.firestore.FieldValue.serverTimestamp()
+
+        });
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            nokashResponse.message ||
+            "NoKaSH a refusé le paiement",
+
+          data:
+            nokashResponse
+
+        });
+
+      }
+
+      // ==================================================
+      // ENREGISTREMENT FIRESTORE
+      // ==================================================
+
+      await demandeRef.update({
+
+        paymentReference,
+
+        paymentMethod,
+
+        paymentStatus:
+          "pending",
+
+        statut:
+          "payment_pending",
+
+        nokashStatus:
+          nokashResponse.data?.status ||
+          "PENDING",
+
+        statusReason:
+          null,
+
+        nokashResponse,
+
+        updatedAt:
+          admin.firestore.FieldValue.serverTimestamp()
+
+      });
+
+      // ==================================================
+      // REPONSE FLUTTER
+      // ==================================================
+
+      return res.json({
+
+        success: true,
+
+        demandeId,
+
+        paymentReference,
+
+        paymentMethod,
+
+        data:
+          nokashResponse,
+
+        message:
+          "Paiement initié avec succès"
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Erreur initiate-payment :",
+        error.response?.data ||
+        error.message ||
+        error
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        message:
+          "Impossible d'initier le paiement"
+
+      });
+
+    }
+
+  }
+);
+
+// ==================================================
+// SERVEUR
+// ==================================================
+
+const PORT =
+  process.env.PORT || 10000;
+
+app.listen(
+  PORT,
+  () => {
+
+    console.log(
+      `Serveur lancé sur le port ${PORT}`
+    );
+
+  }
+);
