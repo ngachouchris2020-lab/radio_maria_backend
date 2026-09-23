@@ -1357,9 +1357,7 @@ app.post(
 );
 
 // ==================================================
-// ==================================================
 // INITIATION PAIEMENT SERVICE SPIRITUEL
-// ==================================================
 // ==================================================
 
 app.post(
@@ -1369,8 +1367,17 @@ app.post(
     try {
 
       const {
-        demandeId
+        demandeId,
+        telephone,
+        paymentMethod
       } = req.body;
+
+      console.log("======================================");
+      console.log("PAIEMENT SERVICE - REQUETE FLUTTER");
+      console.log("demandeId =", demandeId);
+      console.log("telephone =", telephone);
+      console.log("paymentMethod =", paymentMethod);
+      console.log("======================================");
 
       // ==================================================
       // VALIDATION
@@ -1379,12 +1386,26 @@ app.post(
       if (!demandeId) {
 
         return res.status(400).json({
-
           success: false,
+          message: "demandeId manquant"
+        });
 
-          message:
-            "demandeId manquant"
+      }
 
+      if (!telephone) {
+
+        return res.status(400).json({
+          success: false,
+          message: "Numéro Mobile Money manquant"
+        });
+
+      }
+
+      if (!paymentMethod) {
+
+        return res.status(400).json({
+          success: false,
+          message: "Méthode de paiement manquante"
         });
 
       }
@@ -1404,12 +1425,8 @@ app.post(
       if (!demandeDoc.exists) {
 
         return res.status(404).json({
-
           success: false,
-
-          message:
-            "Demande de service introuvable"
-
+          message: "Demande de service introuvable"
         });
 
       }
@@ -1417,8 +1434,65 @@ app.post(
       const demande =
         demandeDoc.data();
 
+      console.log(
+        "Demande trouvée :",
+        {
+          service: demande.service,
+          montant: demande.montant,
+          userId: demande.userId
+        }
+      );
+
       // ==================================================
-      // VERIFICATION MONTANT
+      // VERIFICATION DU STATUT
+      // ==================================================
+
+      if (demande.status !== "paiement_requis") {
+
+        console.log(
+          "Statut actuel de la demande :",
+          demande.status
+        );
+
+        // On accepte aussi payment_pending pour éviter
+        // de bloquer un paiement déjà préparé.
+        if (demande.status !== "payment_pending") {
+
+          return res.status(400).json({
+
+            success: false,
+
+            message:
+              "Le paiement n'est pas disponible pour cette demande"
+
+          });
+
+        }
+
+      }
+
+      // ==================================================
+      // VERIFICATION PAIEMENT DEJA EFFECTUE
+      // ==================================================
+
+      if (
+        demande.paymentStatus === "success" ||
+        demande.paymentStatus === "paid"
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Cette demande a déjà été payée"
+
+        });
+
+      }
+
+      // ==================================================
+      // MONTANT
       // ==================================================
 
       const montant =
@@ -1441,43 +1515,26 @@ app.post(
       }
 
       // ==================================================
-      // TELEPHONE
-      // ==================================================
-
-      if (!demande.telephone) {
-
-        return res.status(400).json({
-
-          success: false,
-
-          message:
-            "Numéro Mobile Money manquant"
-
-        });
-
-      }
-
-      // ==================================================
       // OPERATEUR
       // ==================================================
 
       const operateur =
-        String(
-          demande.paymentMethod || ""
-        )
+        String(paymentMethod)
           .trim()
           .toLowerCase();
 
-      let paymentMethod;
+      let nokashPaymentMethod;
 
       if (
         operateur === "mtn" ||
         operateur === "momo" ||
         operateur === "mtn momo" ||
-        operateur === "mtn_momo"
+        operateur === "mtn_momo" ||
+        operateur === "mtn mobile money" ||
+        operateur === "mtn_mobile_money"
       ) {
 
-        paymentMethod =
+        nokashPaymentMethod =
           "MTN_MOMO";
 
       } else if (
@@ -1486,7 +1543,7 @@ app.post(
         operateur === "orange_money"
       ) {
 
-        paymentMethod =
+        nokashPaymentMethod =
           "ORANGE_MONEY";
 
       } else {
@@ -1517,14 +1574,20 @@ app.post(
       // APPEL NOKASH
       // ==================================================
 
+      console.log("======================================");
+      console.log("INITIALISATION PAIEMENT SERVICE");
+      console.log("demandeId =", demandeId);
+      console.log("montant =", montant);
+      console.log("telephone =", telephone);
       console.log(
-        "Initialisation paiement service :",
-        {
-          demandeId,
-          montant,
-          paymentMethod
-        }
+        "paymentMethod =",
+        nokashPaymentMethod
       );
+      console.log(
+        "paymentReference =",
+        paymentReference
+      );
+      console.log("======================================");
 
       const nokashResponse =
         await createPayment({
@@ -1533,7 +1596,7 @@ app.post(
             montant,
 
           phone:
-            String(demande.telephone),
+            String(telephone),
 
           description:
             demande.service,
@@ -1541,20 +1604,27 @@ app.post(
           reference:
             paymentReference,
 
-          paymentMethod,
+          paymentMethod:
+            nokashPaymentMethod,
 
           callbackUrl
 
         });
 
+      // ==================================================
+      // REPONSE NOKASH
+      // ==================================================
+
+      console.log("======================================");
+      console.log("NO KASH PAYMENT RESPONSE");
       console.log(
-        "Réponse NoKaSH service :",
-        nokashResponse
+        JSON.stringify(
+          nokashResponse,
+          null,
+          2
+        )
       );
       console.log("======================================");
-console.log("NO KASH PAYMENT RESPONSE");
-console.log(JSON.stringify(nokashResponse, null, 2));
-console.log("======================================");
 
       // ==================================================
       // NOKASH REFUSE
@@ -1611,10 +1681,17 @@ console.log("======================================");
 
         paymentReference,
 
-        paymentMethod,
+        paymentMethod:
+          nokashPaymentMethod,
+
+        telephone:
+          String(telephone),
 
         paymentStatus:
           "pending",
+
+        status:
+          "payment_pending",
 
         statut:
           "payment_pending",
@@ -1633,6 +1710,11 @@ console.log("======================================");
 
       });
 
+      console.log(
+        "Paiement service enregistré dans Firestore :",
+        demandeId
+      );
+
       // ==================================================
       // REPONSE FLUTTER
       // ==================================================
@@ -1645,7 +1727,8 @@ console.log("======================================");
 
         paymentReference,
 
-        paymentMethod,
+        paymentMethod:
+          nokashPaymentMethod,
 
         data:
           nokashResponse,
@@ -1658,10 +1741,21 @@ console.log("======================================");
     } catch (error) {
 
       console.error(
-        "Erreur initiate-payment :",
+        "======================================"
+      );
+
+      console.error(
+        "ERREUR INITIATE PAYMENT"
+      );
+
+      console.error(
         error.response?.data ||
         error.message ||
         error
+      );
+
+      console.error(
+        "======================================"
       );
 
       return res.status(500).json({
@@ -1669,29 +1763,16 @@ console.log("======================================");
         success: false,
 
         message:
-          "Impossible d'initier le paiement"
+          "Impossible d'initier le paiement",
+
+        error:
+          error.response?.data ||
+          error.message ||
+          "Erreur inconnue"
 
       });
 
     }
-
-  }
-);
-
-// ==================================================
-// SERVEUR
-// ==================================================
-
-const PORT =
-  process.env.PORT || 10000;
-
-app.listen(
-  PORT,
-  () => {
-
-    console.log(
-      `Serveur lancé sur le port ${PORT}`
-    );
 
   }
 );
