@@ -561,25 +561,31 @@ app.post("/nokash-webhook", async (req, res) => {
       const reason =
         data.statusReason ||
         "UNKNOWN";
+await demandeRef.update({
 
-      await serviceDoc.ref.update({
+  paymentStatus:
+    "failed",
 
-        paymentStatus:
-          "failed",
+  status:
+    "payment_failed",
 
-        statut:
-          "payment_failed",
+  statut:
+    "payment_failed",
 
-        statusReason:
-          reason,
+  nokashStatus:
+    nokashResponse.status ||
+    "FAILED",
 
-        datePaiement:
-          null,
+  statusReason:
+    nokashResponse.message ||
+    "NoKaSH a refusé le paiement",
 
-        updatedAt:
-          admin.firestore.FieldValue.serverTimestamp()
+  nokashResponse,
 
-      });
+  updatedAt:
+    admin.firestore.FieldValue.serverTimestamp()
+
+});
 
       console.log(
         "Paiement service échoué :",
@@ -588,34 +594,37 @@ app.post("/nokash-webhook", async (req, res) => {
 
       return res.sendStatus(200);
     }
+// ==================================================
+// PAIEMENT SERVICE SUCCESS
+// ==================================================
 
-    // ==================================================
-    // PAIEMENT SERVICE SUCCESS
-    // ==================================================
+await serviceDoc.ref.update({
 
-    await serviceDoc.ref.update({
+  paymentStatus:
+    "success",
 
-      paymentStatus:
-        "paid",
+  status:
+    "paye",
 
-      statut:
-        "paid",
+  statut:
+    "paye",
 
-      paymentStatusLabel:
-        "Paiement confirmé",
+  paymentStatusLabel:
+    "Paiement confirmé",
 
-      transactionId:
-        data.id ||
-        data.transaction_id ||
-        null,
+  transactionId:
+    data.id ||
+    data.transaction_id ||
+    null,
 
-      datePaiement:
-        admin.firestore.FieldValue.serverTimestamp(),
+  datePaiement:
+    admin.firestore.FieldValue.serverTimestamp(),
 
-      updatedAt:
-        admin.firestore.FieldValue.serverTimestamp()
+  updatedAt:
+    admin.firestore.FieldValue.serverTimestamp()
 
-    });
+});
+  
 
     // ==================================================
     // NOTIFICATION UTILISATEUR
@@ -1439,7 +1448,9 @@ app.post(
         {
           service: demande.service,
           montant: demande.montant,
-          userId: demande.userId
+          userId: demande.userId,
+          status: demande.status,
+          paymentStatus: demande.paymentStatus
         }
       );
 
@@ -1447,27 +1458,24 @@ app.post(
       // VERIFICATION DU STATUT
       // ==================================================
 
-      if (demande.status !== "paiement_requis") {
+      if (
+        demande.status !== "paiement_requis" &&
+        demande.status !== "payment_pending"
+      ) {
 
         console.log(
           "Statut actuel de la demande :",
           demande.status
         );
 
-        // On accepte aussi payment_pending pour éviter
-        // de bloquer un paiement déjà préparé.
-        if (demande.status !== "payment_pending") {
+        return res.status(400).json({
 
-          return res.status(400).json({
+          success: false,
 
-            success: false,
+          message:
+            "Le paiement n'est pas disponible pour cette demande"
 
-            message:
-              "Le paiement n'est pas disponible pour cette demande"
-
-          });
-
-        }
+        });
 
       }
 
@@ -1639,6 +1647,9 @@ app.post(
 
           paymentStatus:
             "failed",
+
+          status:
+            "payment_failed",
 
           statut:
             "payment_failed",
