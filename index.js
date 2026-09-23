@@ -552,48 +552,50 @@ app.post("/nokash-webhook", async (req, res) => {
 
     });
 
-    // ==================================================
-    // PAIEMENT SERVICE ECHEC
-    // ==================================================
+   // ==================================================
+// PAIEMENT SERVICE ECHEC
+// ==================================================
 
-    if (status !== "SUCCESS") {
+if (status !== "SUCCESS") {
 
-      const reason =
-        data.statusReason ||
-        "UNKNOWN";
-await demandeRef.update({
+  const reason =
+    data.statusReason ||
+    "UNKNOWN";
 
-  paymentStatus:
-    "failed",
+  await serviceDoc.ref.update({
 
-  status:
-    "payment_failed",
+    paymentStatus:
+      "failed",
 
-  statut:
-    "payment_failed",
+    status:
+      "payment_failed",
 
-  nokashStatus:
-    nokashResponse.status ||
-    "FAILED",
+    statut:
+      "payment_failed",
 
-  statusReason:
-    nokashResponse.message ||
-    "NoKaSH a refusé le paiement",
+    nokashStatus:
+      status || "FAILED",
 
-  nokashResponse,
+    statusReason:
+      reason,
 
-  updatedAt:
-    admin.firestore.FieldValue.serverTimestamp()
+    datePaiement:
+      null,
 
-});
+    updatedAt:
+      admin.firestore.FieldValue.serverTimestamp()
 
-      console.log(
-        "Paiement service échoué :",
-        serviceDoc.id
-      );
+  });
 
-      return res.sendStatus(200);
-    }
+  console.log(
+    "Paiement service échoué :",
+    serviceDoc.id,
+    "raison :",
+    reason
+  );
+
+  return res.sendStatus(200);
+}
 // ==================================================
 // PAIEMENT SERVICE SUCCESS
 // ==================================================
@@ -1784,6 +1786,23 @@ app.post(
       });
 
     }
+
+  }
+);
+// ==================================================
+// SERVEUR
+// ==================================================
+
+const PORT =
+  process.env.PORT || 10000;
+
+app.listen(
+  PORT,
+  () => {
+
+    console.log(
+      `Serveur lancé sur le port ${PORT}`
+    );
 
   }
 );
